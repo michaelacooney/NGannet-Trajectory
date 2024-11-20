@@ -1,0 +1,1011 @@
+#Lab Assignment #2 - Task 1 Trajectory analysis
+
+#GPS tracking data of five individuals from a colony on Alderney island in the Guernsey archipelago over a period of several days in June 2011
+
+setwd("~/Documents/Advanced GIS/Lab assignment 2")
+install.packages('adehabitatLT')
+install.packages('lubridate')
+install.packages('sf')
+install.packages('ggplot2')
+install.packages('grid')
+install.packages('gridExtra')
+install.packages('circular')
+
+# Run this if you have already installed the packages 
+library(adehabitatLT) # for analysing trajectories
+library(lubridate) # for processing time
+library(sf) # for dealing with spatial data
+library(ggplot2) # for making nice figures
+library(grid) # for creating grids in figures
+library(gridExtra) # for creating grids in figures
+library(circular) # for circular statistics of turning angles and heading
+
+# Read data
+gannets <- read.csv('NorthernGannets_ForAssignment.csv')
+#poor quality data has already been removed 
+
+# Unique individuals
+individuals <- unique(gannets$individual.local.identifier)
+individuals
+
+##########Task 1: Trajectory analysis#########
+
+
+  ####After first creating a map of individual trajectories (Step 1)...
+
+  #####before step 2, we need to prep the temporal attributes
+#to check the format of the timestamp attribute 
+head(gannets)
+#we already know that the month and year will remain the same for all data points 
+
+
+#two ways to deal with  time in trajectories
+## we just use the second here 
+
+# Convert timestamp to POSIX format
+gannets$POSIX <- as.POSIXct(gannets$timestamp, format="%Y/%m/%d %H:%M:%S")
+head(gannets)
+tail(gannets)
+
+#prepping geographic coordinates 
+# Convert the gannets data frame into an sf object by specifying which columns are coordinates
+# Also specify coordinate system, which in our case is WGS1984 (EPSG:4326 - for EPSG codes we just need the number))
+gannetsSF <- st_as_sf(gannets, coords=c('location.long','location.lat'), crs=4326)
+gannetsSF
+
+# Define new projection
+crsnew <- st_crs("EPSG:3042")
+
+# Transform data into the new coordinate system
+gannetsSF_proj <- st_transform(gannetsSF,crs=crsnew)
+head(gannetsSF_proj)
+
+# Read X an Y from geometry column as separate coordinates
+gannetsSF_proj$X <- st_coordinates(gannetsSF_proj)[,1]  
+gannetsSF_proj$Y <- st_coordinates(gannetsSF_proj)[,2]
+
+# Drop geometry column
+gannetsSF_proj <- st_drop_geometry(gannetsSF_proj)
+head(gannetsSF_proj)
+
+# First turn the SF into a data frame
+gannets_cleanedDF <- as.data.frame(gannetsSF_proj)
+
+# Now save this into a csv file, giving the name of the projection in the filename
+write.csv(gannets_cleanedDF, 'gannets_CleanData_projected_ESRI3042.csv')
+#this csv is what we will read in from the beginning for Task 2
+
+
+  #### Step 2: Plot distributions and calculate mean and standard deviation of segment duration, length and speed for all five individuals
+
+# Create a set of trajectories, one per each gannet
+gannets_ltraj <- as.ltraj(xy=gannetsSF_proj[,c('X','Y')],  # spatial Coordinates
+                        date = gannetsSF_proj$POSIX,      # timestamp in POSIX format, including date/time
+                        id = gannetsSF_proj$individual.local.identifier)                # individual IDs
+
+# plotting trajectories to check
+plot(gannets_ltraj)
+dev.off() #keep the rstudio graphics device from acting up
+plot(gannets_ltraj)
+
+#to measure the specifics of each gannet
+gannet1 <- gannets_ltraj[[1]]
+gannet2 <- gannets_ltraj[[2]]
+gannet3 <- gannets_ltraj[[3]]
+gannet4 <- gannets_ltraj[[4]]
+gannet5 <- gannets_ltraj[[5]]
+
+# Building a ggplot histogram for time difference
+
+# but first removing the last row of the trajectory, which has NA values (this will mess up the plots otherwise)
+
+#for gannet 1
+# Checking to see if there are NAs:
+tail(gannet1)
+
+# And now let's remove that row.
+nrows <- nrow(gannet1) # find number of rows for this trajectory
+gannet1 <- gannet1[-nrows,] # remove the last row, i.e. row no. nrows
+tail(gannet1)
+
+
+#histogram of segment duration (dt)
+ggplot(gannet1, aes(x=dt))+geom_histogram()
+
+ggplot(gannet1, aes(x=dt))+geom_histogram(binwidth=10)+
+  theme_bw()+xlab("Segment duration (s)")+ylab("Count")+ggtitle("Segment Duration for Gannet 1")
+
+
+#histogram of segment length (dist)
+ggplot(gannet1, aes(x=dist))+geom_histogram()
+
+ggplot(gannet1, aes(x=dist))+geom_histogram(binwidth=100)+
+  theme_bw()+xlab("Segment length (m)")+ylab("Count")+ggtitle("Segment Length for Gannet 1")
+
+# Calculate speed in m/S
+gannet1$speedMS <- gannet1$dist/gannet1$dt
+
+# Convert to km/h
+gannet1$speedKmH <- gannet1$speedMS * 3.6
+
+# Plot of speed in km/h
+ggplot(gannet1, aes(x=speedKmH))+geom_histogram()+
+  theme_bw()+xlab("Speed (km/h)")+ylab("Count")+ggtitle("Speed for Gannet 1")
+
+ggplot(gannet1, aes(x=speedKmH))+geom_histogram(binwidth=1)+
+  theme_bw()+xlab("Speed (km/h)")+ylab("Count")+ggtitle("Speed for Gannet 1")
+
+#to export plots in grid 
+duration_plot <- ggplot(gannet1, aes(x=dt))+geom_histogram(binwidth=10)+
+  theme_bw()+xlab("Segment duration (s)")+ylab("Count")+ggtitle("Segment Duration for Gannet 1")
+
+length_plot <- ggplot(gannet1, aes(x=dist))+geom_histogram(binwidth=100)+
+  theme_bw()+xlab("Segment length (m)")+ylab("Count")+ggtitle("Segment Length for Gannet 1")
+
+speed_plot <- ggplot(gannet1, aes(x=speedKmH))+geom_histogram(binwidth=1)+
+  theme_bw()+xlab("Speed (km/h)")+ylab("Count")+ggtitle("Speed for Gannet 1")
+
+
+# Export into figure:
+png(filename="Gannet1_Duration_Length_Speed.png")
+# Put the three plots in a gridded display with 3 rows and 1 column
+grid.newpage()
+pushViewport(viewport(layout=grid.layout(3,1)))
+print(duration_plot, vp=viewport(layout.pos.col = 1, layout.pos.row =1))
+print(length_plot, vp=viewport(layout.pos.col = 1, layout.pos.row =2))
+print(speed_plot, vp=viewport(layout.pos.col = 1, layout.pos.row =3))
+dev.off() 
+
+#considered doing a loop for these, but I want to be able to alter the binwidth for each as needed
+
+#for gannet 2
+# Checking for NAs:
+tail(gannet2)
+
+# and removing those rows.
+nrows <- nrow(gannet2) # find number of rows for this trajectory
+gannet2 <- gannet2[-nrows,] # remove the last row, i.e. row no. nrows
+tail(gannet2)
+
+
+#histogram of segment duration (dt)
+ggplot(gannet2, aes(x=dt))+geom_histogram()
+
+ggplot(gannet2, aes(x=dt))+geom_histogram(binwidth=10)+
+  theme_bw()+xlab("Segment duration (s)")+ylab("Count")+ggtitle("Segment Duration for Gannet 2")
+
+
+#histogram of segment length (dist)
+ggplot(gannet2, aes(x=dist))+geom_histogram()
+
+ggplot(gannet2, aes(x=dist))+geom_histogram(binwidth=50)+
+  theme_bw()+xlab("Segment length (m)")+ylab("Count")+ggtitle("Segment Length for Gannet 2")
+
+# Calculate speed in m/S
+gannet2$speedMS <- gannet2$dist/gannet2$dt
+
+# Convert to km/h
+gannet2$speedKmH <- gannet2$speedMS * 3.6
+
+# Plot of speed in km/h
+ggplot(gannet2, aes(x=speedKmH))+geom_histogram()+
+  theme_bw()+xlab("Speed (km/h)")+ylab("Count")+ggtitle("Speed for Gannet 2")
+
+ggplot(gannet2, aes(x=speedKmH))+geom_histogram(binwidth=1)+
+  theme_bw()+xlab("Speed (km/h)")+ylab("Count")+ggtitle("Speed for Gannet 2")
+
+#to export plots in grid 
+duration_plot <- ggplot(gannet2, aes(x=dt))+geom_histogram(binwidth=10)+
+  theme_bw()+xlab("Segment duration (s)")+ylab("Count")+ggtitle("Segment Duration for Gannet 2")
+
+length_plot <- ggplot(gannet1, aes(x=dist))+geom_histogram(binwidth=50)+
+  theme_bw()+xlab("Segment length (m)")+ylab("Count")+ggtitle("Segment Length for Gannet 2")
+
+speed_plot <- ggplot(gannet1, aes(x=speedKmH))+geom_histogram(binwidth=1)+
+  theme_bw()+xlab("Speed (km/h)")+ylab("Count")+ggtitle("Speed for Gannet 2")
+
+
+# Export into figure:
+png(filename="Gannet2_Duration_Length_Speed.png")
+# Put the three plots in a gridded display with 3 rows and 1 column
+grid.newpage()
+pushViewport(viewport(layout=grid.layout(3,1)))
+print(duration_plot, vp=viewport(layout.pos.col = 1, layout.pos.row =1))
+print(length_plot, vp=viewport(layout.pos.col = 1, layout.pos.row =2))
+print(speed_plot, vp=viewport(layout.pos.col = 1, layout.pos.row =3))
+dev.off() 
+
+#gannet 3 
+# Checking to see if there are NAs:
+tail(gannet3)
+
+# and removing those rows.
+nrows <- nrow(gannet3) # find number of rows for this trajectory
+gannet3 <- gannet3[-nrows,] # remove the last row, i.e. row no. nrows
+tail(gannet3)
+
+# Histogram of segment duration (dt)
+ggplot(gannet3, aes(x=dt)) + geom_histogram()
+
+ggplot(gannet3, aes(x=dt)) + geom_histogram(binwidth=10) +
+  theme_bw() + xlab("Segment duration (s)") + ylab("Count") + ggtitle("Segment Duration for Gannet 3")
+
+# Histogram of segment length (dist)
+ggplot(gannet3, aes(x=dist)) + geom_histogram()
+
+ggplot(gannet3, aes(x=dist)) + geom_histogram(binwidth=5) +
+  theme_bw() + xlab("Segment length (m)") + ylab("Count") + ggtitle("Segment Length for Gannet 3")
+
+# Calculate speed in m/S
+gannet3$speedMS <- gannet3$dist / gannet3$dt
+
+# Convert to km/h
+gannet3$speedKmH <- gannet3$speedMS * 3.6
+
+# Plot of speed in km/h
+ggplot(gannet3, aes(x=speedKmH)) + geom_histogram() +
+  theme_bw() + xlab("Speed (km/h)") + ylab("Count") + ggtitle("Speed for Gannet 3")
+
+ggplot(gannet3, aes(x=speedKmH)) + geom_histogram(binwidth=1) +
+  theme_bw() + xlab("Speed (km/h)") + ylab("Count") + ggtitle("Speed for Gannet 3")
+
+# To export plots in grid
+duration_plot <- ggplot(gannet3, aes(x=dt)) + geom_histogram(binwidth=10) +
+  theme_bw() + xlab("Segment duration (s)") + ylab("Count") + ggtitle("Segment Duration for Gannet 3")
+
+length_plot <- ggplot(gannet3, aes(x=dist)) + geom_histogram(binwidth=50) +
+  theme_bw() + xlab("Segment length (m)") + ylab("Count") + ggtitle("Segment Length for Gannet 3")
+
+speed_plot <- ggplot(gannet3, aes(x=speedKmH)) + geom_histogram(binwidth=1) +
+  theme_bw() + xlab("Speed (km/h)") + ylab("Count") + ggtitle("Speed for Gannet 3")
+
+# Export into figure
+png(filename="Gannet3_Duration_Length_Speed.png")
+# Put the three plots in a gridded display with 3 rows and 1 column
+grid.newpage()
+pushViewport(viewport(layout=grid.layout(3,1)))
+print(duration_plot, vp=viewport(layout.pos.col = 1, layout.pos.row = 1))
+print(length_plot, vp=viewport(layout.pos.col = 1, layout.pos.row = 2))
+print(speed_plot, vp=viewport(layout.pos.col = 1, layout.pos.row = 3))
+dev.off()
+
+
+#gannet 4 
+# Checking for NAs:
+tail(gannet4)
+
+# and removing those rows.
+nrows <- nrow(gannet4) # find number of rows for this trajectory
+gannet4 <- gannet4[-nrows,] # remove the last row, i.e. row no. nrows
+tail(gannet4)
+
+# Histogram of segment duration (dt)
+ggplot(gannet4, aes(x=dt)) + geom_histogram()
+
+ggplot(gannet4, aes(x=dt)) + geom_histogram(binwidth=1) +
+  theme_bw() + xlab("Segment duration (s)") + ylab("Count") + ggtitle("Segment Duration for Gannet 4")
+
+# Histogram of segment length (dist)
+ggplot(gannet4, aes(x=dist)) + geom_histogram()
+
+ggplot(gannet4, aes(x=dist)) + geom_histogram(binwidth=50) +
+  theme_bw() + xlab("Segment length (m)") + ylab("Count") + ggtitle("Segment Length for Gannet 4")
+
+# Calculate speed in m/S
+gannet4$speedMS <- gannet4$dist / gannet4$dt
+
+# Convert to km/h
+gannet4$speedKmH <- gannet4$speedMS * 3.6
+
+# Plot of speed in km/h
+ggplot(gannet4, aes(x=speedKmH)) + geom_histogram() +
+  theme_bw() + xlab("Speed (km/h)") + ylab("Count") + ggtitle("Speed for Gannet 4")
+
+ggplot(gannet4, aes(x=speedKmH)) + geom_histogram(binwidth=1) +
+  theme_bw() + xlab("Speed (km/h)") + ylab("Count") + ggtitle("Speed for Gannet 4")
+
+# To export plots in grid
+duration_plot <- ggplot(gannet4, aes(x=dt)) + geom_histogram(binwidth=1) +
+  theme_bw() + xlab("Segment duration (s)") + ylab("Count") + ggtitle("Segment Duration for Gannet 4")
+
+length_plot <- ggplot(gannet4, aes(x=dist)) + geom_histogram(binwidth=50) +
+  theme_bw() + xlab("Segment length (m)") + ylab("Count") + ggtitle("Segment Length for Gannet 4")
+
+speed_plot <- ggplot(gannet4, aes(x=speedKmH)) + geom_histogram(binwidth=1) +
+  theme_bw() + xlab("Speed (km/h)") + ylab("Count") + ggtitle("Speed for Gannet 4")
+
+# Export into figure
+png(filename="Gannet4_Duration_Length_Speed.png")
+# Put the three plots in a gridded display with 3 rows and 1 column
+grid.newpage()
+pushViewport(viewport(layout=grid.layout(3,1)))
+print(duration_plot, vp=viewport(layout.pos.col = 1, layout.pos.row = 1))
+print(length_plot, vp=viewport(layout.pos.col = 1, layout.pos.row = 2))
+print(speed_plot, vp=viewport(layout.pos.col = 1, layout.pos.row = 3))
+dev.off()
+
+#gannet 5 
+# Checking for NAs:
+tail(gannet5)
+
+# and removing those rows.
+nrows <- nrow(gannet5) # find number of rows for this trajectory
+gannet5 <- gannet5[-nrows,] # remove the last row, i.e. row no. nrows
+tail(gannet5)
+
+# Histogram of segment duration (dt)
+ggplot(gannet5, aes(x=dt)) + geom_histogram()
+
+#Here we can tell given the spread that there must a outlier
+#we use a boxplot to take a closer look 
+ggplot(gannet, aes(x=dt))+geom_boxplot()
+
+#cut out outliers past 2000
+gannet5 <- gannet5[-which(gannet5$dt>2000),] 
+
+# check
+ggplot(gannet5, aes(x=dt))+geom_boxplot()
+#that cleaned things up 
+
+#run again 
+ggplot(gannet5, aes(x=dt)) + geom_histogram()
+
+ggplot(gannet5, aes(x=dt)) + geom_histogram(binwidth=10) +
+  theme_bw() + xlab("Segment duration (s)") + ylab("Count") + ggtitle("Segment Duration for Gannet 5")
+
+# Histogram of segment length (dist)
+ggplot(gannet5, aes(x=dist)) + geom_histogram()
+
+ggplot(gannet5, aes(x=dist)) + geom_histogram(binwidth=50) +
+  theme_bw() + xlab("Segment length (m)") + ylab("Count") + ggtitle("Segment Length for Gannet 5")
+
+# Calculate speed in m/S
+gannet5$speedMS <- gannet5$dist / gannet5$dt
+
+# Convert to km/h
+gannet5$speedKmH <- gannet5$speedMS * 3.6
+
+# Plot of speed in km/h
+ggplot(gannet5, aes(x=speedKmH)) + geom_histogram() +
+  theme_bw() + xlab("Speed (km/h)") + ylab("Count") + ggtitle("Speed for Gannet 5")
+
+ggplot(gannet5, aes(x=speedKmH)) + geom_histogram(binwidth=1) +
+  theme_bw() + xlab("Speed (km/h)") + ylab("Count") + ggtitle("Speed for Gannet 5")
+
+# To export plots in grid
+duration_plot <- ggplot(gannet5, aes(x=dt)) + geom_histogram(binwidth=10) +
+  theme_bw() + xlab("Segment duration (s)") + ylab("Count") + ggtitle("Segment Duration for Gannet 5")
+
+length_plot <- ggplot(gannet5, aes(x=dist)) + geom_histogram(binwidth=50) +
+  theme_bw() + xlab("Segment length (m)") + ylab("Count") + ggtitle("Segment Length for Gannet 5")
+
+speed_plot <- ggplot(gannet5, aes(x=speedKmH)) + geom_histogram(binwidth=1) +
+  theme_bw() + xlab("Speed (km/h)") + ylab("Count") + ggtitle("Speed for Gannet 5")
+
+# Export into figure
+png(filename="Gannet5_Duration_Length_Speed.png")
+# Put the three plots in a gridded display with 3 rows and 1 column
+grid.newpage()
+pushViewport(viewport(layout=grid.layout(3,1)))
+print(duration_plot, vp=viewport(layout.pos.col = 1, layout.pos.row = 1))
+print(length_plot, vp=viewport(layout.pos.col = 1, layout.pos.row = 2))
+print(speed_plot, vp=viewport(layout.pos.col = 1, layout.pos.row = 3))
+dev.off()
+
+
+######
+
+
+
+# Calculate mean values of duration, lenght and speed for gannet 1
+# Remember, data for gannet 1 is accessible as the first element of the gannets_ltraj list:
+gannets_ltraj[[1]]
+# This is what we will use to calculate statistics
+
+# assign the data to a generic variable we will use in the for loop
+thisgannet <- gannets_ltraj[[1]]
+
+# need to calculate speed for all
+thisgannet$speedKmH <- (thisgannet$dist/thisgannet$dt)*3.6 #3.6 converts meters per second (m/s) to kilometers per hour (km/h)
+
+# get rid of all NA values in the respective columns
+dtNAs <- which(is.na(thisgannet$dt)==TRUE | is.na(thisgannet$dist)==TRUE | is.na(thisgannet$speedKmH)==TRUE)
+# We remove rows with NAs
+thisgannet <- thisgannet[-dtNAs,]
+
+# calculate statistics for this gannet
+dt_mean <- mean(thisgannet$dt)
+dt_std <- sd(thisgannet$dt)
+dist_mean <- mean(thisgannet$dist)
+dist_std <- sd(thisgannet$dist)
+speedKmH_mean <- mean(thisgannet$speedKmH)
+speedKmH_std <- sd(thisgannet$speedKmH)
+
+
+# Part 2: Initialise data frame for results: we want one that will have as many rows as there are individual gannets, plus columns for ID and all the statistics (7 columns in total).
+
+#building a data frame with NA of the correct size 
+results <- data.frame(matrix(NA, ncol = 7, nrow = length(individuals))) 
+
+# add names to columns
+columnNames <- c("ID","dt_mean","dt_std","dist_mean","dist_std","speedKmH_mean","speedKmH_std")
+names(results) <- columnNames
+
+# Check 
+results
+
+# Before writing the loop we can also populate the ID column directly, this can be done using the function id from adehabitatLT
+# Check:
+id(gannets_ltraj)
+
+# assign this to results:
+results$ID <- id(gannets_ltraj)
+
+# Check 
+results
+
+# Step 3: For loop to calculate all the statistics
+
+for (i in 1:length(individuals)) {
+  
+  # code from step 1, but with index i
+  
+  # assign the data to a generic variable to use in the for loop
+  thisgannet <- gannets_ltraj[[i]] 
+  
+  thisgannet$speedKmH <- (thisgannet$dist/thisgannet$dt)*3.6
+  
+  dtNAs <- which(is.na(thisgannet$dt)==TRUE | is.na(thisgannet$dist)==TRUE | is.na(thisgannet$speedKmH)==TRUE)
+  thisgannet <- thisgannet[-dtNAs,]
+  
+  results$dt_mean[i] <- mean(thisgannet$dt)
+  results$dt_std[i] <- sd(thisgannet$dt)
+  results$dist_mean[i] <- mean(thisgannet$dist)
+  results$dist_std[i] <- sd(thisgannet$dist)
+  results$speedKmH_mean[i] <- mean(thisgannet$speedKmH)
+  results$speedKmH_std[i] <- sd(thisgannet$speedKmH)
+  
+} # end for 
+
+# pull results
+results
+
+
+
+
+
+
+
+
+
+#####Part 2 - Net Squared Displacement#####
+
+# add two columns to results data frame 
+results$R2n_mean <- NA
+results$R2n_std <- NA
+# Check
+results
+
+
+# for loop to populate these two columns
+
+for (i in 1:length(individuals)) {
+  
+  # Assign data to the generic variable
+  thisgannet <- gannets_ltraj[[i]] 
+  
+  # Then we need to get rid of all NA values in the respective column
+  R2nNAs <- which(is.na(thisgannet$R2n)==TRUE)
+  
+  # If statement: if there are some NAs, we remove them, if not, we don't do anything.
+  if (length(R2nNAs)>0) {
+    thisgannet <- thisgannet[-R2nNAs,]
+  }
+  
+  # calculate statistics and put them into the results data frame, in row i
+  results$R2n_mean[i] <- mean(thisgannet$R2n)
+  results$R2n_std[i] <- sd(thisgannet$R2n)
+  
+} # end for 
+
+# Check 
+results
+
+
+#now plotting the R2n
+
+# Gannet 1 
+ggplot(gannets_ltraj[[1]], aes(x=date, y=R2n)) + geom_point(color = "darkred") + 
+  theme_bw()+xlab("Date")+ylab("R2n")+ggtitle("Net square displacement over time for gannet 1")
+
+# Gannet 2 
+ggplot(gannets_ltraj[[2]], aes(x=date, y=R2n)) + geom_point(color = "darkred") + 
+  theme_bw()+xlab("Date")+ylab("R2n")+ggtitle("Net square displacement over time for gannet 2")
+
+# Gannet 3 
+ggplot(gannets_ltraj[[3]], aes(x=date, y=R2n)) + geom_point(color = "darkred") + 
+  theme_bw()+xlab("Date")+ylab("R2n")+ggtitle("Net square displacement over time for gannet 3")
+
+# Gannet 4 
+ggplot(gannets_ltraj[[4]], aes(x=date, y=R2n)) + geom_point(color = "darkred") + 
+  theme_bw()+xlab("Date")+ylab("R2n")+ggtitle("Net square displacement over time for gannet 4")
+
+# Gannet 5 
+ggplot(gannets_ltraj[[5]], aes(x=date, y=R2n)) + geom_point(color = "darkred") + 
+  theme_bw()+xlab("Date")+ylab("R2n")+ggtitle("Net square displacement over time for gannet 5")
+
+
+#export
+gannet1_netsquared <- ggplot(gannets_ltraj[[1]], aes(x=date, y=R2n)) + geom_point() + 
+  theme_bw()+xlab("Date")+ylab("R2n")+ggtitle("Net square displacement over time for gannet 1")
+
+gannet2_netsquared <- ggplot(gannets_ltraj[[2]], aes(x=date, y=R2n)) + geom_point() + 
+  theme_bw()+xlab("Date")+ylab("R2n")+ggtitle("Net square displacement over time for gannet 2")
+
+gannet3_netsquared <- ggplot(gannets_ltraj[[3]], aes(x=date, y=R2n)) + geom_point() + 
+  theme_bw()+xlab("Date")+ylab("R2n")+ggtitle("Net square displacement over time for gannet 3")
+
+gannet4_netsquared <- ggplot(gannets_ltraj[[4]], aes(x=date, y=R2n)) + geom_point() + 
+  theme_bw()+xlab("Date")+ylab("R2n")+ggtitle("Net square displacement over time for gannet 4")
+
+gannet5_netsquared <- ggplot(gannets_ltraj[[5]], aes(x=date, y=R2n)) + geom_point() + 
+  theme_bw()+xlab("Date")+ylab("R2n")+ggtitle("Net square displacement over time for gannet 5")
+
+
+# Export into figure:
+png(filename="Gannet_NetSquared_Plots.png")
+# Put the three plots in a gridded display with 3 rows and 2 column
+
+grid.newpage()
+pushViewport(viewport(layout=grid.layout(3, 2)))
+
+print(gannet1_netsquared, vp=viewport(layout.pos.row = 1, layout.pos.col = 1))
+print(gannet2_netsquared, vp=viewport(layout.pos.row = 1, layout.pos.col = 2))
+print(gannet3_netsquared, vp=viewport(layout.pos.row = 2, layout.pos.col = 1))
+print(gannet4_netsquared, vp=viewport(layout.pos.row = 2, layout.pos.col = 2))
+print(gannet5_netsquared, vp=viewport(layout.pos.row = 3, layout.pos.col = 1))
+dev.off()
+
+
+
+
+
+
+##### Part 3 - circular plots for turning angle and heading for all individuals and calculate their circular mean and circular sd  ######
+
+# Take one gannet
+thisgannet <- gannets_ltraj[[1]]
+
+# Convert relative angle from radians into degrees
+thisgannet$turningAngle <- thisgannet$rel.angle * 180 / pi
+# Check
+head(thisgannet)
+
+# Build a circular plot
+angleplot <- ggplot(thisgannet, aes(x=turningAngle)) + geom_histogram(binwidth=2)+coord_polar(start = pi)+
+  theme_bw()+scale_x_continuous(limits = c(-180,180),breaks=c(-180,-90,0,90,180))+xlab("Turning Angle")+ylab("Count")+
+  ggtitle("Turning angle for gannet 1")
+
+# Export as a figure
+png(filename="Gannet1_TurningAngle.png")
+print(angleplot)
+
+# Remove NAs 
+turnNAs <- which(is.na(thisgannet$turningAngle)==TRUE)
+
+# If statement: if there are some NAs, we remove them, if not, we don't do anything.
+if (length(turnNAs)>0) {
+  thisgannet <- thisgannet[-turnNAs,]
+}
+
+# Calculate statistics - because angles are circular, we need to use circular mean and circular std, from package circular
+turningAngle_mean <- mean(circular(thisgannet$turningAngle))
+turningAngle_std <- sd(circular(thisgannet$turningAngle))
+
+# add two columns to results data frame
+results$turningAngle_mean <- NA
+results$turningAngle_std <- NA
+# Check 
+results
+# For loop for all the gannets
+for (i in 1:length(individuals)) {
+  
+  thisgannet <- gannets_ltraj[[i]]
+  
+  # Convert relative angle from radians into degrees
+  thisgannet$turningAngle <- thisgannet$rel.angle * 180 / pi
+  
+  # Build a circular plot
+  angleplot <- ggplot(thisgannet, aes(x=turningAngle)) + geom_histogram(binwidth=2, fill = "red", color = "black")+coord_polar(start = pi)+
+    theme_bw()+scale_x_continuous(limits = c(-180,180),breaks=c(-180,-90,0,90,180))+xlab("Turning Angle")+ylab("Count")+
+    ggtitle(paste("Turning angle for gannet ",i, sep=""))
+  
+  # Export as a figure
+  png(filename=paste("Gannet",i,"_TurningAngle.png",sep=""))
+  print(angleplot)
+  dev.off()
+  
+  # Remove NAs 
+  turnNAs <- which(is.na(thisgannet$turningAngle)==TRUE)
+  
+  #  If statement: if there are some NAs, we remove them, if not, we don't do anything.
+  if (length(turnNAs)>0) {
+    thisgannet <- thisgannet[-turnNAs,]
+  }
+  
+  # Calculate statistics - because angles are circular,  use circular mean and circular std.
+  # This means that we first transform the vector into a circular object and then calculate mean/std.
+  results$turningAngle_mean[i] <- mean(circular(thisgannet$turningAngle))
+  results$turningAngle_std[i] <- sd(circular(thisgannet$turningAngle))
+  
+} # end for
+# Check 
+results
+
+
+##calculate now the heading (the angle of the compass direction of movement)
+
+thisgannet <- gannets_ltraj[[2]]
+
+# Check for x and y coordinates
+head(thisgannet)
+
+# called x and y. 
+
+# need to know the number of points in the trajectory, by checking the length of one of the coordinates
+nPoints <- length(thisgannet$x)
+
+# add a new field for the heading to thisgannet data frame
+thisgannet$heading <- NA
+
+# For loop through the trajectory, but not to the end, we skip the final point!
+
+for (i in 1:(nPoints-1)) {
+  
+  # read the coordinates from two consecutive points, i and i+1
+  x1 <- thisgannet$x[i]
+  x2 <- thisgannet$x[i+1]
+  y1 <- thisgannet$y[i]
+  y2 <- thisgannet$y[i+1]
+  
+  # calculate the heading as arctan of the two values, plus convert to degrees
+  thisgannet$heading[i] <- atan2((x2-x1),(y2-y1)) * 180 / pi
+  
+}
+
+# Build a circular plot
+angleplot <- ggplot(thisgannet, aes(x=heading)) + geom_histogram(binwidth=2, fill = "red", color = "black")+coord_polar(start = pi)+
+  theme_bw()+scale_x_continuous(limits = c(-180,180),breaks=c(-180,-90,0,90,180))+
+  xlab("Heading")+ylab("Count")+ggtitle("Heading for gannet 2")
+
+# Export as a figure
+png(filename="Gannet2_Heading.png")
+print(angleplot)
+
+# Remove NAs - there will be at least one, for the last point through which we didn't loop
+headingNAs <- which(is.na(thisgannet$heading)==TRUE)
+
+# If there are some NAs, we remove them, if not, we don't do anything.
+if (length(headingNAs)>0) {
+  thisgannet <- thisgannet[-headingNAs,]
+}
+
+# Calculate statistics - because angles are circular, we need to use circular mean and circular std, from package circular
+heading_mean <- mean(circular(thisgannet$heading))
+heading_std <- sd(circular(thisgannet$heading))
+
+
+# add two columns to the results data frame 
+results$heading_mean <- NA
+results$heading_std <- NA
+# Check what happened
+results
+
+# Here start the nested loops
+
+# External For loop for all the gannets - note the index is now called j!
+for (j in 1:length(individuals)) {
+  
+  thisgannet <- gannets_ltraj[[j]]
+  
+  # need to know the number of points in the   trajectory,by checking the length of one of the coordinates.
+  nPoints <- length(thisgannet$x)
+  
+  # add a new field for the heading to this data frame
+  thisgannet$heading <- NA
+  
+  # Internal for loop through the trajectory, but not to the end, we skip the final point!
+  # This loop has index i
+  for (i in 1:(nPoints-1)) {
+    
+    # Let's read the coordinates from two consecutive points, i and i+1
+    x1 <- thisgannet$x[i]
+    x2 <- thisgannet$x[i+1]
+    y1 <- thisgannet$y[i]
+    y2 <- thisgannet$y[i+1]
+    
+    # And calculate the heading as arctan of the two values, plus convert to degrees
+    thisgannet$heading[i] <- atan2((x2-x1),(y2-y1)) * 180 / pi
+    
+  } # end for i
+  
+  # Build a circular plot
+  angleplot <- ggplot(thisgannet, aes(x=heading)) + geom_histogram(binwidth=2, fill = "red", color = "black")+coord_polar(start = pi)+
+    theme_bw()+scale_x_continuous(limits = c(-180,180),breaks=c(-180,-90,0,90,180))+
+    xlab("Heading")+ylab("Count")+ggtitle(paste("Heading for gannet ",j,sep=""))
+  
+  # Export as a figure
+  png(filename=paste("Gannet",j,"_Heading.png",sep=""))
+  print(angleplot)
+  dev.off()
+  
+  # Remove NAs - there will be at least one, for the last point through which we didn't loop
+  headingNAs <- which(is.na(thisgannet$heading)==TRUE)
+  
+  # If there are some NAs, we remove them, if not, we don't do anything.
+  if (length(headingNAs)>0) {
+    thisgannet <- thisgannet[-headingNAs,]
+  }
+  
+  # Calculate statistics - because angles are circular, we need to use circular mean and circular std
+  results$heading_mean[j] <- mean(circular(thisgannet$heading))
+  results$heading_std[j] <- sd(circular(thisgannet$heading))
+  
+} # end for j
+# Check results
+results
+
+dev.off()
+
+
+####Part 4 -  radius of gyration####
+
+# Pick a gannet
+thisgannet <- gannets_ltraj[[3]]
+
+# Find number of points in this trajectory
+noPoints <- length(thisgannet$x)
+
+# Calculate the mean centre of all locations
+# This is done by summing up all x's and dividing by number of points to get the x coordinate of the centre.
+# And the same for y coordinate.
+centreX <- sum(thisgannet$x)/noPoints
+centreY <- sum(thisgannet$y)/noPoints
+
+# Distance of each point to (centreX, centreY)
+thisgannet$distTocentre <- sqrt((centreX-thisgannet$x)^2+(centreY-thisgannet$y)^2)
+
+# Check result
+head(thisgannet)
+
+# Calculate radius of gyration
+gyration <- sqrt(sum(thisgannet$distTocentre)/noPoints)
+
+######
+
+# Prepare the field in the results data frame
+results$gyration <- NA
+
+# For loop across all gannets
+
+for (i in 1:length(individuals)) {
+  
+  # Pick a gannet
+  thisgannet <- gannets_ltraj[[i]]
+  
+  # Find number of points in this trajectory
+  noPoints <- length(thisgannet$x)
+  
+  # Calculate the mean centre of all locations
+  centreX <- sum(thisgannet$x)/noPoints
+  centreY <- sum(thisgannet$y)/noPoints
+  
+  # Distance of each point to (centreX, centreY)
+  thisgannet$distTocentre <- sqrt((centreX-thisgannet$x)^2+(centreY-thisgannet$y)^2)
+  
+  # Calculate radius of gyration and insert it into the results data frame
+  results$gyration[i] <- sqrt(sum(thisgannet$distTocentre)/noPoints)
+  
+}
+
+
+# Check results
+results
+
+# Last additional to results for task 1, so exporting
+write.csv(results, "Gannet_results_task1.csv", row.names=FALSE)
+
+
+#looping the plots was having trouble exporting, so just ran them individually
+
+#time series plots of distance to the center for all 
+# Gannet 1
+thisgannet <- gannets_ltraj[[1]]
+noPoints <- length(thisgannet$x)
+centreX <- sum(thisgannet$x) / noPoints
+centreY <- sum(thisgannet$y) / noPoints
+thisgannet$distTocentre <- sqrt((centreX - thisgannet$x)^2 + (centreY - thisgannet$y)^2)
+
+gyration_plot_1 <- ggplot(thisgannet, aes(x = date, y = distTocentre)) + geom_line(color = "darkred") + 
+  theme_bw() + xlab("Date") + ylab("Distance to Center (m)") + ggtitle("Distance to the Center for Gannet 1")
+print(gyration_plot_1)
+# Export as a figure
+png(filename="Gannet1_Gyration_TimeSeries.png")
+print(gyration_plot_1) 
+dev.off()
+
+
+# Gannet 2
+thisgannet <- gannets_ltraj[[2]]
+noPoints <- length(thisgannet$x)
+centreX <- sum(thisgannet$x) / noPoints
+centreY <- sum(thisgannet$y) / noPoints
+thisgannet$distTocentre <- sqrt((centreX - thisgannet$x)^2 + (centreY - thisgannet$y)^2)
+
+gyration_plot_2 <- ggplot(thisgannet, aes(x = date, y = distTocentre)) + geom_line(color = "darkred") + 
+  theme_bw() + xlab("Date") + ylab("Distance to Center (m)") + ggtitle("Distance to the Center for Gannet 2")
+print(gyration_plot_2)
+png(filename="Gannet2_Gyration_TimeSeries.png")
+print(gyration_plot_2) 
+dev.off()
+
+# Gannet 3
+thisgannet <- gannets_ltraj[[3]]
+noPoints <- length(thisgannet$x)
+centreX <- sum(thisgannet$x) / noPoints
+centreY <- sum(thisgannet$y) / noPoints
+thisgannet$distTocentre <- sqrt((centreX - thisgannet$x)^2 + (centreY - thisgannet$y)^2)
+
+gyration_plot_3 <- ggplot(thisgannet, aes(x = date, y = distTocentre)) + geom_line(color = "darkred") + 
+  theme_bw() + xlab("Date") + ylab("Distance to Center (m)") + ggtitle("Distance to the Center for Gannet 3")
+print(gyration_plot_3)
+png(filename="Gannet3_Gyration_TimeSeries.png")
+print(gyration_plot_3) 
+dev.off()
+
+
+# Gannet 4
+thisgannet <- gannets_ltraj[[4]]
+noPoints <- length(thisgannet$x)
+centreX <- sum(thisgannet$x) / noPoints
+centreY <- sum(thisgannet$y) / noPoints
+thisgannet$distTocentre <- sqrt((centreX - thisgannet$x)^2 + (centreY - thisgannet$y)^2)
+
+gyration_plot_4 <- ggplot(thisgannet, aes(x = date, y = distTocentre)) + geom_line(color = "darkred") + 
+  theme_bw() + xlab("Date") + ylab("Distance to Center (m)") + ggtitle("Distance to the Center for Gannet 4")
+print(gyration_plot_4)
+png(filename="Gannet4_Gyration_TimeSeries.png")
+print(gyration_plot_4) 
+dev.off()
+
+
+# Gannet 5
+thisgannet <- gannets_ltraj[[5]]
+noPoints <- length(thisgannet$x)
+centreX <- sum(thisgannet$x) / noPoints
+centreY <- sum(thisgannet$y) / noPoints
+thisgannet$distTocentre <- sqrt((centreX - thisgannet$x)^2 + (centreY - thisgannet$y)^2)
+
+gyration_plot_5 <- ggplot(thisgannet, aes(x = date, y = distTocentre)) + geom_line(color = "darkred") + 
+  theme_bw() + xlab("Date") + ylab("Distance to Center (m)") + ggtitle("Distance to the Center for Gannet 5")
+print(gyration_plot_5)
+png(filename="Gannet5_Gyration_TimeSeries.png")
+print(gyration_plot_5) 
+dev.off()
+
+
+
+
+
+
+
+#######Task 3 - Sinuosity######
+
+####part 1 - calculating the sinuosity ####
+# Function to calculate sinuosity
+calculate_sinuosity <- function(thisgannet) {
+  # Initialize an empty vector to store sinuosity values
+  sinuosity <- rep(NA, nrow(thisgannet))
+  
+  # Loop over each point in the trajectory (excluding the first and last points)
+  for (i in 2:(nrow(thisgannet) - 1)) {
+    # Calculate the lengths of segments P(i-1)P(i) and P(i)P(i+1)
+    segment1 <- sqrt((thisgannet$x[i] - thisgannet$x[i - 1])^2 + (thisgannet$y[i] - thisgannet$y[i - 1])^2)
+    segment2 <- sqrt((thisgannet$x[i + 1] - thisgannet$x[i])^2 + (thisgannet$y[i + 1] - thisgannet$y[i])^2)
+    
+    # Calculate the straight-line distance P(i-1)P(i+1)
+    straight_distance <- sqrt((thisgannet$x[i + 1] - thisgannet$x[i - 1])^2 + (thisgannet$y[i + 1] - thisgannet$y[i - 1])^2)
+    
+    # Calculate sinuosity for point i
+    sinuosity[i] <- (segment1 + segment2) / straight_distance
+  }
+  
+  # Add sinuosity as a new column in the gannet's trajectory data
+  thisgannet$sinuosity <- sinuosity
+  return(thisgannet)
+}
+
+# Process each gannet's trajectory and calculate sinuosity
+for (i in 1:length(gannets_ltraj)) {
+  gannets_ltraj[[i]] <- calculate_sinuosity(gannets_ltraj[[i]])
+}
+
+
+#to be able to export and take a look at raw data 
+# Loop through each gannet's trajectory to process and export as CSV
+for (i in 1:length(gannets_ltraj)) {
+  # Calculate sinuosity for the current gannet
+  gannets_ltraj[[i]] <- calculate_sinuosity(gannets_ltraj[[i]])
+  
+  # Export the data frame to a CSV file
+  write.csv(gannets_ltraj[[i]], file = paste0("Gannet_", i, "_Sinuosity.csv"), row.names = FALSE)
+}
+
+
+
+
+###part 2 - Time Series Plots of Sinuosity ###
+
+# Loop through each gannet's trajectory to plot sinuosity over time
+for (i in 1:length(gannets_ltraj)) {
+  # Extract current gannet's data
+  thisgannet <- gannets_ltraj[[i]]
+  
+  # Plot time series of sinuosity
+  sinuosity_plot <- ggplot(thisgannet, aes(x = date, y = sinuosity)) + geom_line() + 
+    theme_bw() +xlab("Date") + ylab("Sinuosity") + ggtitle(paste("Sinuosity Over Time for Gannet", i))
+  
+  # Display the plot
+  print(sinuosity_plot)
+  png(filename=paste("Gannet",j,"_Sinuosity_TimeSeries.png",sep=""))
+  print(gyration_plot)
+  dev.off()
+  
+  # Save the plot as an image file
+  #ggsave(filename = paste0("Gannet_", i, "_Sinuosity_TimeSeries.png"), plot = sinuosity_plot, width = 8, height = 6)
+}
+
+
+
+###Part 3 - Mean and SD of Sinuosity####
+# Create a data frame with no values (NAs) of the right size: as many rows as there are unique gannets
+sinuosity_results <- data.frame(matrix(NA, ncol = 3, nrow = length(individuals)))
+
+# Add names to columns
+columnNames <- c("ID", "sinuosity_mean", "sinuosity_sd")
+names(sinuosity_results) <- columnNames
+
+# Populate the ID column with unique identifiers for each gannet
+sinuosity_results$ID <- id(gannets_ltraj)
+
+# Check the initialized data frame
+print(sinuosity_results)
+
+# Loop through each gannet's trajectory to clean and calculate statistics
+for (i in 1:length(gannets_ltraj)) {
+  # Extract the current gannet's data
+  thisgannet <- gannets_ltraj[[i]]
+  
+  # Check for and remove duplicate or very closely spaced points
+  distances <- sqrt(diff(thisgannet$x)^2 + diff(thisgannet$y)^2)
+  close_points <- which(distances < 1e-1)  # Adjust the threshold as needed for "very close" points
+  if (length(close_points) > 0) {
+    thisgannet <- thisgannet[-(close_points + 1), ]  # Remove the points identified as close
+  }
+  
+  # Identify and remove rows with NA in the sinuosity column
+  thisgannet <- thisgannet[!is.na(thisgannet$sinuosity), ]
+  
+  # Calculate mean and standard deviation of sinuosity for this gannet
+  sinuosity_results$sinuosity_mean[i] <- mean(thisgannet$sinuosity, na.rm = TRUE)
+  sinuosity_results$sinuosity_sd[i] <- sd(thisgannet$sinuosity, na.rm = TRUE)
+}
+
+# Display the sinuosity results
+print(sinuosity_results)
+
+# Save the sinuosity results to a CSV file
+write.csv(sinuosity_results, "Gannet_Sinuosity_Statistics.csv", row.names = FALSE) 
+
+
+##End of Script for both task one and task three##
