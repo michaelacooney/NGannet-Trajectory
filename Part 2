@@ -1,0 +1,155 @@
+
+###Lab Assignment #2 - Task 2 Space Use###
+#written in a different script from the other two tasks 
+
+
+setwd("~/Documents/Advanced GIS/Lab assignment 2")
+install.packages('adehabitatHR')
+install.packages('adehabitatLT')
+install.packages('sf')
+install.packages('scales')
+install.packages('grid')
+install.packages('gridExtra')
+install.packages('terra')
+
+
+library(adehabitatHR) # for space use
+library(sf) # for dealing with spatial data
+library(scales) # makes polygons transparent in plotting
+library(grid) # for creating grids in figures
+library(gridExtra) # for creating grids in figures
+library(terra) # for manipulating raster data
+library(adehabitatLT) # for ltraj objects
+
+
+# Read data
+gannets <- read.csv('gannets_CleanData_projected_ESRI3042.csv')
+head(gannets)
+
+#to check for the names of columns with spatial coordinates
+names(gannets)
+
+# They are called "X" and "Y"
+
+# selecting the important information from the dataset: gannet identifier, geographic and temporal attributes
+gannets_sel <- cbind.data.frame(gannets$individual.local.identifier, gannets$X, gannets$Y, gannets$timestamp, gannets$POSIX)
+# and to fix those column names
+names(gannets_sel) <- c('ID','X','Y','timestamp','POSIX')
+
+#then we create an sf object, using the coordinate names and the projection (which we saved as part of filename)
+gannets_sf <- st_as_sf(gannets_sel, coords = c("X", "Y"), crs = 'EPSG:3042')
+
+# and finally it is transformed into a Spatial Data Points object
+gannets_sp <- as_Spatial(gannets_sf)
+
+
+########Part 1 - Calculate Minimum Convex Polygon#####
+# The mcp function needs to know which column of the input data is the ID of the animal - in our case
+# this is the first column. So this is what we specify in the call.
+# telling the mcp funtion which column the gannet ID is in - here it is in the first column
+# then calculating MCP for our gannets looking at 95% of all points. 
+gannets_mcp <- mcp(gannets_sp[,1], percent = 95)
+
+# Examine output
+gannets_mcp
+
+# plotting the MCPs
+plot(gannets_mcp)
+
+#all the gannets are visible together and fit a similar scale
+
+# plotting MCP for gannet 1 as a transparent polygon (set by parameter alpha)
+plot(gannets_mcp, col = alpha(1:5, 0.5))
+# and then add the points
+points(gannets_sp, col = as.factor(gannets_sp@data$ID), pch = 16)
+
+#to export all five MCPs as one .shp we first convert them in a sf object with st_as_sf
+st_write(st_as_sf(gannets_mcp), "Gannets_mcp1.shp")
+
+#mapping work in QGIS happening from here
+
+#####Part 2 - Calculating the home ranges and core areas from KDE density#####
+
+#to be able to identify specific gannets
+individuals <- unique(gannets$individual.local.identifier)
+
+# Select only data of this gannet from the Spatial Data Points Object
+gannet1 <- gannets_sp[which(as.data.frame(gannets_sp)$ID==individuals[1]),]
+gannet2 <- gannets_sp[which(as.data.frame(gannets_sp)$ID==individuals[2]),]
+gannet3 <- gannets_sp[which(as.data.frame(gannets_sp)$ID==individuals[3]),]
+gannet4 <- gannets_sp[which(as.data.frame(gannets_sp)$ID==individuals[4]),]
+gannet5 <- gannets_sp[which(as.data.frame(gannets_sp)$ID==individuals[5]),]
+
+#first we optimize the bandwidth 
+
+#for gannet 1 
+# Calculate KDE using the reference bandwith
+kde_ref <- kernelUD(gannet1[,1],h='href')
+
+# Calculate KDE using the LSCV optimisation (this takes longer)
+kde_lscv <- kernelUD(gannet1[,1],h='LSCV')
+
+
+# plotting the two surfaces
+# The output is a list with one item per gannet, so we need to plot the first element of the list,indicated by double square brackets.
+# We are also choosing display colours, the terrain colours in this case
+#reference first 
+plot(kde_ref[[1]],col=rev(terrain.colors(n=100)))
+#then LSCV
+plot(kde_lscv[[1]],col=rev(terrain.colors(n=100)))
+
+# and plotting the optimisation graph
+plotLSCV(kde_lscv)
+
+
+
+
+### KDE with different values for grid and extent and plot the results
+
+#again, need to identify the ID column, the first column in gannet1_sp
+#same4all parameter = all surfaces should have the same extent
+#and smaller number of cells 
+gannets_kde <- kernelUD(gannets_sp[,1],h='href', grid=500, extent=0.2, same4all=TRUE)                          
+
+# Plot the result
+plot(gannets_kde[[1]])
+
+plot(gannets_kde[[2]])
+plot(gannets_kde[[3]])
+plot(gannets_kde[[4]])
+plot(gannets_kde[[5]])
+
+# Create rasters from the kde output using the rast function from package terra using for loop 
+for (i in 1:(length(individuals)-1)) {
+  # Create a raster
+  r <- rast(as(gannets_kde[[i]], "SpatialPixelsDataFrame")) 
+  # Save it as geotiff
+  writeRaster(r, filename = paste('gannet',i+1,'_kde.tif',sep=""), overwrite=TRUE)
+}
+
+#home ranges and core areas from a KDE
+
+# The rest
+gannets_kde_hr95 <- getverticeshr(gannets_kde,percent=95)
+gannets_kde_hr50 <- getverticeshr(gannets_kde,percent=50)
+
+# plotting
+plot(gannets_kde_hr95)
+plot(gannets_kde_hr50)
+
+# The home ranges and core areas are SpatialPolgyonDataFrames, so we can export these as shapefiles.
+st_write(st_as_sf(gannets_kde_hr95), "Gannets_HR95.shp")
+st_write(st_as_sf(gannets_kde_hr50), "Gannets_HR50.shp")
+
+# outputs 
+gannets_kde_hr95
+gannets_kde_hr50
+
+# Convert to a data frame 
+gannets_kde_hr50_df <- as.data.frame(gannets_kde_hr50)
+write.csv(gannets_kde_hr50_df, "gannets_kde_hr50.csv", row.names = FALSE)
+
+
+##won't be doing brownian bridges here 
+
+#the end :)
